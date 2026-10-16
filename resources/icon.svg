@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Endfield Cloud Client - 图标源文件(SVG)
+  颜色取自明日方舟终末地游戏 UI 配色:冷蓝 + 暗金
+  替换说明:换图标只需改这个 SVG,然后运行 scripts/make-icon.sh 重新生成 PNG
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a1628"/>
+      <stop offset="100%" stop-color="#1e3a5f"/>
+    </linearGradient>
+    <linearGradient id="fg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e8c878"/>
+      <stop offset="100%" stop-color="#c89b4a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景圆角矩形 -->
+  <rect x="16" y="16" width="480" height="480" rx="80" ry="80" fill="url(#bg)"/>
+
+  <!-- 边框 -->
+  <rect x="16" y="16" width="480" height="480" rx="80" ry="80"
+        fill="none" stroke="url(#fg)" stroke-width="4" opacity="0.6"/>
+
+  <!-- "E" 字样 + 云符号 -->
+  <text x="256" y="320" font-family="sans-serif" font-size="280" font-weight="bold"
+        text-anchor="middle" fill="url(#fg)">E</text>
+
+  <!-- 云朵线条(代表云游戏) -->
+  <path d="M 100 180 Q 100 140 140 140 Q 150 110 180 110 Q 220 110 230 145
+           Q 260 130 290 145 Q 310 110 340 130 Q 380 130 380 175 L 380 185
+           L 100 185 Z"
+        fill="none" stroke="#7ab8d9" stroke-width="6" stroke-linejoin="round" opacity="0.85"/>
+
+  <!-- 云朵底部弧线 -->
+  <path d="M 110 195 Q 240 215 370 195" fill="none" stroke="#7ab8d9"
+        stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+</svg>
