@@ -88,7 +88,13 @@ process.env.HTTP_PROXY = process.env.HTTPS_PROXY = process.env.http_proxy = proc
 // CLI 参数解析
 // ============================================================
 function parseCliArgs(argv) {
-  const out = { url: GAME_URL, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT, fullscreen: false };
+  const out = {
+    url: GAME_URL,
+    width: null,         // null = 自动检测(显示 75%)
+    height: null,
+    fullscreen: false,
+    windowMode: null,    // 'auto' | 'fullscreen' | 'windowed'
+  };
   for (const arg of argv) {
     if (arg.startsWith('--url=')) {
       out.url = arg.slice('--url='.length);
@@ -100,6 +106,12 @@ function parseCliArgs(argv) {
       }
     } else if (arg === '--fullscreen') {
       out.fullscreen = true;
+    } else if (arg === '--windowed') {
+      out.windowMode = 'windowed';
+    } else if (arg === '--window-mode=fullscreen') {
+      out.windowMode = 'fullscreen';
+    } else if (arg.startsWith('--window-mode=')) {
+      out.windowMode = arg.slice('--window-mode='.length);
     }
   }
   return out;
@@ -149,8 +161,26 @@ const cliOpts = parseCliArgs(process.argv.slice(1));
 // ============================================================
 function createMainWindow() {
   const state = loadWindowState();
-  const width = cliOpts.width !== DEFAULT_WIDTH ? cliOpts.width : state.width;
-  const height = cliOpts.height !== DEFAULT_HEIGHT ? cliOpts.height : state.height;
+  const { screen } = require('electron');
+
+  // 决定初始窗口尺寸:
+  //   1) CLI 显式 --window-size  → 用 CLI
+  //   2) 上次保存的窗口大小       → 用 state
+  //   3) 否则                     → 主显示器工作区 75%(适配外接显示器 / 掌机屏)
+  let width, height;
+  if (cliOpts.width && cliOpts.height) {
+    width = cliOpts.width;
+    height = cliOpts.height;
+  } else if (state.width && state.height) {
+    width = state.width;
+    height = state.height;
+  } else {
+    const display = screen.getPrimaryDisplay();
+    const wa = display.workAreaSize;
+    width = Math.max(640, Math.min(wa.width, Math.round(wa.width * 0.75)));
+    height = Math.max(480, Math.min(wa.height, Math.round(wa.height * 0.75)));
+    console.log(`[window] auto-size: display=${wa.width}x${wa.height} → ${width}x${height}`);
+  }
 
   mainWindow = new BrowserWindow({
     width,
@@ -158,6 +188,10 @@ function createMainWindow() {
     backgroundColor: '#000000',
     autoHideMenuBar: true,
     title: 'Endfield Cloud',
+    // 明确:窗口可调整大小(用户拖边框缩放)
+    resizable: true,
+    minWidth: 640,
+    minHeight: 480,
     // Steam 识别窗口类名 — 让 Steam Input / 覆盖层能找到
     // 实际类名由 package.json "name" 字段决定(electron-builder 打包后)
     webPreferences: {
@@ -179,7 +213,11 @@ function createMainWindow() {
 
   // 准备就绪后显示
   mainWindow.once('ready-to-show', () => {
-    if (cliOpts.fullscreen || state.fullscreen) {
+    const wantFullscreen =
+      cliOpts.fullscreen ||
+      (cliOpts.windowMode === 'fullscreen') ||
+      (cliOpts.windowMode === null && state.fullscreen);
+    if (wantFullscreen) {
       mainWindow.setFullScreen(true);
     }
     mainWindow.show();
@@ -189,6 +227,26 @@ function createMainWindow() {
   mainWindow.on('resize', () => saveWindowState(mainWindow));
   mainWindow.on('move', () => saveWindowState(mainWindow));
   mainWindow.on('close', () => saveWindowState(mainWindow));
+
+  // 注入合成 user activation,让 Chromium 立刻激活 Web Gamepad / Web Audio
+  // 根因:Chromium 默认要求用户先有点击/键盘才轮询 getGamepads,云游戏页面没激活就不轮询
+  mainWindow.webContents.once('did-finish-load', () => {
+    setTimeout(() => {
+      mainWindow.webContents.executeJavaScript(`
+        (() => {
+          // 模拟一次用户激活(不冒泡到 UI,只触发内部激活状态)
+          const ev = new MouseEvent('click', {
+            bubbles: false, cancelable: true, view: window,
+            button: 0, buttons: 0, clientX: 0, clientY: 0
+          });
+          document.dispatchEvent(ev);
+          // 顺手给个键盘激活(WebRTC / Web Audio 也要)
+          const kev = new KeyboardEvent('keydown', { bubbles: false, key: 'Tab' });
+          document.dispatchEvent(kev);
+        })();
+      `).catch((err) => console.error('[user-activation] failed:', err.message));
+    }, 800);
+  });
 
   // 外部链接默认浏览器打开(避免在游戏窗口里跳走)
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -218,6 +276,13 @@ function registerShortcuts(win) {
   win.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return;
 
+    // Ctrl/Alt/Cmd 修饰键:
+    //   input.meta = Cmd(macOS) / Super(Linux)
+    //   input.control = Ctrl
+    //   input.alt = Alt
+    //   input.shift = Shift
+    const ctrlOrMeta = !!(input.control || input.meta);
+
     switch (input.key) {
       case 'F11':
         // 无边框全屏切换
@@ -242,6 +307,23 @@ function registerShortcuts(win) {
         win.webContents.send('toggle-gamepad', gamepadMuted);
         console.log(`[gamepad] ${gamepadMuted ? 'MUTED' : 'ENABLED'}`);
         event.preventDefault();
+        break;
+      case 'q':
+      case 'Q':
+        // Ctrl+Q / Cmd+Q → 退出应用
+        if (ctrlOrMeta) {
+          console.log('[quit] Ctrl+Q');
+          app.quit();
+          event.preventDefault();
+        }
+        break;
+      case 'F4':
+        // Alt+F4 → 退出
+        if (input.alt) {
+          console.log('[quit] Alt+F4');
+          app.quit();
+          event.preventDefault();
+        }
         break;
     }
   });
