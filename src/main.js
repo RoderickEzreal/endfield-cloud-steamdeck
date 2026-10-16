@@ -253,6 +253,21 @@ function createMainWindow() {
     mainWindow.focus();
     // 1 秒后取消 always-on-top,避免挡其它窗口
     setTimeout(() => mainWindow.setAlwaysOnTop(false), 1000);
+
+    // 调试:窗口创建后给用户视觉反馈(2 秒后消失)
+    // Steam Deck 掌机模式下窗口可能被 Gamescope 隐藏,这个 overlay 是显眼的"窗口可见"指示
+    if (process.env.ENDFIELD_DEBUG_OVERLAY === '1') {
+      mainWindow.webContents.executeJavaScript(`
+        (() => {
+          const d = document.createElement('div');
+          d.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#000;color:#0f0;padding:40px 60px;font:32px monospace;border:4px solid #0f0;z-index:999999;';
+          d.id = 'endfield-debug-overlay';
+          d.innerHTML = 'ENDFIELD CLOUD<br><br>窗口已创建<br>正在加载...';
+          document.body.appendChild(d);
+          setTimeout(() => { const el = document.getElementById('endfield-debug-overlay'); if (el) el.remove(); }, 2000);
+        })();
+      `).catch(() => {});
+    }
   });
 
   // 持久化窗口大小
