@@ -257,21 +257,6 @@ function createMainWindow() {
     }
     mainWindow.show();
     mainWindow.focus();
-
-    // 调试 overlay(ENDFIELD_DEBUG_OVERLAY=1):窗口创建 2 秒后消失的视觉指示
-    // 用途:如果用户看到此 overlay,说明窗口确实显示出来了;看不到则说明被某层遮盖
-    if (process.env.ENDFIELD_DEBUG_OVERLAY === '1') {
-      mainWindow.webContents.executeJavaScript(`
-        (() => {
-          const d = document.createElement('div');
-          d.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#000;color:#0f0;padding:40px 60px;font:32px monospace;border:4px solid #0f0;z-index:999999;';
-          d.id = 'endfield-debug-overlay';
-          d.innerHTML = 'ENDFIELD CLOUD<br><br>窗口已创建<br>正在加载...';
-          document.body.appendChild(d);
-          setTimeout(() => { const el = document.getElementById('endfield-debug-overlay'); if (el) el.remove(); }, 2000);
-        })();
-      `).catch(() => {});
-    }
   });
 
   // 持久化窗口大小
