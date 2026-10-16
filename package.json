@@ -1,6 +1,6 @@
 {
   "name": "endfield-cloud-client",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Lightweight Chromium wrapper for the Endfield cloud game, optimized for Steam Deck (Arch Linux)",
   "main": "src/main.js",
   "author": "roderickezreal",

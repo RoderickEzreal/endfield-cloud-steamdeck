@@ -20,7 +20,9 @@
 set -euo pipefail
 
 SCRIPT_NAME=$(basename "$0")
-STEAM_USER="${SUDO_USER:-$(logname 2>/dev/null || echo 'deck')}"
+# logname 在某些 Arch 衍生版(如 SteamOS read-only root)不可用,用 whoami + ${SUDO_USER:-deck} 兜底
+STEAM_USER="${SUDO_USER:-${USER:-$(whoami 2>/dev/null)}}"
+STEAM_USER="${STEAM_USER:-deck}"
 
 # 颜色输出(只在 TTY 启用)
 if [[ -t 1 ]]; then
@@ -79,25 +81,25 @@ init_pkg_mgr() {
 # ============================================================
 install_runtime() {
   log "安装运行时依赖(Chromium 内核 + GPU + 手柄)..."
+  # 注:`libvulkan` / `libgbm` / `libasound` 在 SteamOS 仓库不存在,
+  #     已并入 `vulkan-icd-loader` / `mesa` / `alsa-lib`。
   $PKG_INSTALL \
     nss \
     gtk3 \
     libxss \
-    libasound \
+    alsa-lib \
     libnotify \
     libxrandr \
     libxcomposite \
     libxdamage \
     libxfixes \
     libxkbcommon \
-    libgbm \
     mesa \
     mesa-vdpau \
     libva \
     libva-utils \
     vulkan-radeon \
     vulkan-icd-loader \
-    libvulkan \
     libevdev \
     udev
   log "运行时依赖安装完成。"

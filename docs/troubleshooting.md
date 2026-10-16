@@ -196,13 +196,7 @@ ls -la /dev/dri/
 
 CPU 占用会变高但能跑。验证是否为 GPU 问题。
 
-#### B. 强制 X11(若 Wayland 兼容差)
-
-```bash
-./endfield-cloud-client --ozone-platform=x11
-```
-
-#### C. 显式指定 GPU
+#### B. 显式指定 GPU
 
 ```bash
 ./endfield-cloud-client --use-gl=egl

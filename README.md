@@ -42,7 +42,7 @@
 | **原生 Web Gamepad API 透传** | Steam Deck / Xbox / DS4 / DualSense 全支持,**不**做键鼠模拟映射 |
 | **持久 Cookie 会话** | 记住鹰角账号登录状态,**不存储任何明文凭据** |
 | **F12 临时禁手柄** | 滑块验证时关闭手柄,用触控板 / 鼠标操作,验证完恢复 |
-| **Wayland-only** | SteamOS 3.x 完全适配,GPU/Vulkan + VA-API 硬件加速 |
+| **Wayland 自适应** | SteamOS 3.x 完全适配,GPU/Vulkan + VA-API 硬件加速;掌机模式 Gamescope 自动走 XWayland(已知 Gamescope Wayland surface 渲染 bug) |
 | **Steam Input 兼容** | 加进 Steam 库后,Steam 控制器布局完整叠加生效 |
 | **轻量** | 关闭扩展、后台、同步、翻译、域名可靠性等无关模块,降低 CPU/内存占用 |
 
@@ -67,8 +67,12 @@ mkdir -p ~/apps
 cp dist/endfield-cloud-client-*.AppImage ~/apps/endfield-cloud-client.AppImage
 chmod +x ~/apps/endfield-cloud-client.AppImage
 
-# 5. 启动
-~/apps/endfield-cloud-client.AppImage --ozone-platform=wayland
+# 5. 用 wrapper 启动(自动适配桌面/掌机模式)
+./scripts/launch-steamdeck.sh /home/deck/apps/endfield-cloud-client.AppImage
+# 或拷到 ~/bin 后:
+cp scripts/launch-steamdeck.sh ~/bin/endfield-cloud
+chmod +x ~/bin/endfield-cloud
+~/bin/endfield-cloud
 ```
 
 #### Steam Deck 用户(下载预编译版本)
@@ -77,12 +81,13 @@ chmod +x ~/apps/endfield-cloud-client.AppImage
 # 下载最新版本
 mkdir -p ~/apps
 cd ~/apps
-curl -L -o endfield-cloud-client.AppImage \
-  https://github.com/RoderickEzreal/endfield-cloud-steamdeck/releases/latest/download/endfield-cloud-client-1.0.2.AppImage
+APPIMAGE_URL=$(curl -sL https://api.github.com/repos/RoderickEzreal/endfield-cloud-steamdeck/releases/latest \
+  | grep browser_download_url | grep AppImage | cut -d '"' -f 4)
+curl -L -o endfield-cloud-client.AppImage "$APPIMAGE_URL"
 chmod +x endfield-cloud-client.AppImage
 
-# 启动
-./endfield-cloud-client.AppImage --ozone-platform=wayland
+# 启动(直接跑;Chromium 自己探测 Wayland vs XWayland)
+./endfield-cloud-client.AppImage
 ```
 
 ### 快捷键
@@ -132,7 +137,7 @@ endfield-cloud-client --window-mode=fullscreen     # auto / fullscreen / windowe
 | SteamOS 3.5+ (Steam Deck 原生) | ✅ 验证通过 |
 | Arch Linux 2024+ | ✅ 验证通过 |
 | Manjaro | ✅ 应该可用(未实测) |
-| 其它 Linux | ⚠️ Wayland-only,X11 用户需手动 `--ozone-platform=x11` |
+| 其它 Linux | ⚠️ Wayland-only;X11 桌面需手动 `--ozone-platform=x11` |
 
 x86_64 only。
 
@@ -162,6 +167,7 @@ endfield-cloud-steamdeck/
 ├── scripts/
 │   ├── install-deps-arch.sh  # Arch 依赖一键装
 │   ├── build-appimage.sh     # AppImage 打包
+│   ├── launch-steamdeck.sh   # Steam Deck 启动 wrapper(自适应 Wayland 模式)
 │   └── steam-add.sh          # 加进 Steam 库的 VDF 注入
 └── docs/                     # 详细文档
 ```
@@ -212,7 +218,7 @@ It is **strictly a thin shell**:
 - **Native Web Gamepad API passthrough** — Steam Deck / Xbox / DS4 / DualSense
 - **Persistent cookie sessions** — no plaintext credentials stored
 - **F12 toggles gamepad** for slider verification
-- **Wayland-only** — Vulkan + VA-API acceleration on Steam Deck
+- **Wayland-first** — Vulkan + VA-API acceleration;Steam Deck gaming mode (Gamescope) auto-falls back to XWayland
 - **Steam Input compatible** — add to Steam library for full overlay support
 
 ### Quick Start (Steam Deck)

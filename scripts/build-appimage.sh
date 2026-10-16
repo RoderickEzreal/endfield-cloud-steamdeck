@@ -136,7 +136,7 @@ if [[ "$DEBUG_MODE" == true ]]; then
   log "产物目录:dist/linux-unpacked/"
   log "直接运行:./dist/linux-unpacked/endfield-cloud-client"
 else
-  appimage=$(ls -1 dist/*.AppImage 2>/dev/null | head -1 || echo "")
+  appimage=$(ls -1t dist/*.AppImage 2>/dev/null | head -1 || echo "")
   if [[ -n "$appimage" ]]; then
     log "产物:$appimage"
     log "运行:./$appimage"

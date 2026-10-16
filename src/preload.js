@@ -33,29 +33,23 @@ const _nativeGetGamepads = navigator.getGamepads
   ? navigator.getGamepads.bind(navigator)
   : () => [];
 
-Object.defineProperty(navigator, 'getGamepads', {
-  configurable: true,
-  enumerable: true,
-  writable: false,
-  value: function getGamepads() {
-    if (gamepadMuted) return [];
-    return _nativeGetGamepads();
-  },
-});
+// defineProperty 可能失败(若 navigator.getGamepads 不可配置),
+// try/catch 保护,失败就静默退回到原生(无静音功能,但不阻断启动)
+try {
+  Object.defineProperty(navigator, 'getGamepads', {
+    configurable: true,
+    enumerable: true,
+    writable: false,
+    value: function getGamepads() {
+      if (gamepadMuted) return [];
+      return _nativeGetGamepads();
+    },
+  });
+} catch (err) {
+  console.warn('[preload] failed to override navigator.getGamepads:', err.message);
+}
 
-// ============================================================
-// 暴露给渲染进程的最小 API(都是只读)
-// ============================================================
-contextBridge.exposeInMainWorld('endfieldClient', {
-  /**
-   * 查询当前手柄是否静音
-   * @returns {Promise<boolean>}
-   */
-  getGamepadMuted: () => ipcRenderer.invoke('get-gamepad-state'),
-
-  /**
-   * 查询运行环境(版本号等诊断信息)
-   * @returns {Promise<{platform: string, arch: string, electron: string, chrome: string, node: string}>}
-   */
-  getEnv: () => ipcRenderer.invoke('get-env'),
-});
+// 注:contextBridge.exposeInMainWorld 不再暴露任何 API。
+// 渲染进程(cloud game page)是第三方页面,我们不主动暴露任何东西给它,
+// 只通过 navigator.getGamepads 拦截实现 F12 静音。
+// 如果未来需要页面主动查询状态,可加回 exposeInMainWorld,但目前不需要。

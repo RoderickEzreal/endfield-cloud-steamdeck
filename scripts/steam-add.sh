@@ -37,8 +37,8 @@ if [[ $# -lt 1 ]]; then
   echo "用法: $0 <AppImage 路径> [自定义名称]"
   echo ""
   echo "示例:"
-  echo "  $0 ~/dist/endfield-cloud-client-1.0.0.AppImage"
-  echo "  $0 ~/dist/endfield-cloud-client-1.0.0.AppImage '终末地云'"
+  echo "  $0 ~/dist/endfield-cloud-client-*.AppImage"
+  echo "  $0 ~/apps/endfield-cloud-client.AppImage '终末地云'"
   exit 1
 fi
 
@@ -137,13 +137,16 @@ EOF
 # 先备份再操作
 cp "$VDF_PATH" "${VDF_PATH}.tmp"
 
-python3 <<PYEOF > "$VDF_PATH"
-import sys, re
+# 用单引号 heredoc 防止 shell 变量展开(NEW_ENTRY 含 VDF 字段,可能有引号),
+# 改用环境变量把数据传给 Python。
+VDF_PATH="$VDF_PATH" NEW_ENTRY="$NEW_ENTRY" python3 <<'PYEOF'
+import os, sys, re
 
-with open("${VDF_PATH}.tmp", "r", encoding="utf-8") as f:
+vdf_path = os.environ['VDF_PATH']
+new_entry = os.environ['NEW_ENTRY']
+
+with open(vdf_path + ".tmp", "r", encoding="utf-8") as f:
     content = f.read()
-
-new_entry = '''$NEW_ENTRY'''
 
 # 找 "Shortcuts" 块开始位置
 m = re.search(r'(\n?\s*"Shortcuts"\s*\{)', content)
@@ -155,7 +158,7 @@ insert_pos = m.end()
 # 在 "{ 后面插入新条目
 content = content[:insert_pos] + "\n" + new_entry + content[insert_pos:]
 
-with open("$VDF_PATH", "w", encoding="utf-8") as f:
+with open(vdf_path, "w", encoding="utf-8") as f:
     f.write(content)
 
 print("[OK] 已写入新条目")
