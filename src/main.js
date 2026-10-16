@@ -217,8 +217,9 @@ function createMainWindow() {
     resizable: true,
     minWidth: 640,
     minHeight: 480,
+    // Steam Deck Gamescope 下无边框窗口更稳(避免 steam Big Picture overlay 遮盖)
+    frame: false,
     // Steam 识别窗口类名 — 让 Steam Input / 覆盖层能找到
-    // 实际类名由 package.json "name" 字段决定(electron-builder 打包后)
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -246,6 +247,12 @@ function createMainWindow() {
       mainWindow.setFullScreen(true);
     }
     mainWindow.show();
+    // 强制提到顶层 + 焦点(Gamescope 下有时被 Steam Big Picture 遮盖)
+    mainWindow.setAlwaysOnTop(true);
+    mainWindow.moveTop();
+    mainWindow.focus();
+    // 1 秒后取消 always-on-top,避免挡其它窗口
+    setTimeout(() => mainWindow.setAlwaysOnTop(false), 1000);
   });
 
   // 持久化窗口大小
