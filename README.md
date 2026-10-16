@@ -1,6 +1,6 @@
 # Endfield Cloud Client
 
-> 专为 **Steam Deck** 设计的轻量级 Chromium 封装壳,用来游玩鹰角《云·明日方舟:终末地》网页云游戏。
+> 专为 **Steam Deck** 设计的轻量级 Chromium 封装壳,用来游玩鹰角网络的《云·明日方舟:终末地》网页云游戏。
 
 [![Latest Release](https://img.shields.io/github/v/release/RoderickEzreal/endfield-cloud-steamdeck?style=flat-square&color=blue)](https://github.com/RoderickEzreal/endfield-cloud-steamdeck/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
