@@ -39,6 +39,10 @@ Thumbs.db
 resources/icons/*.bak
 resources/icons/_unused/
 
+# npm lock + 自动生成的 PNG(由 build 脚本产出)
+package-lock.json
+resources/icons/*.png
+
 # 本地辅助文档(不上传)
 UPLOAD_GITHUB.txt
 LOCAL_*.txt
