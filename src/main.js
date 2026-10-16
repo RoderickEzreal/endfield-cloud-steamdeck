@@ -247,12 +247,11 @@ function createMainWindow() {
       mainWindow.setFullScreen(true);
     }
     mainWindow.show();
-    // 强制提到顶层 + 焦点(Gamescope 下有时被 Steam Big Picture 遮盖)
+    // Steam Deck 掌机模式根因:Steam Big Picture 在 Gamescope 里
+    // 持续作为激活窗口覆盖所有非 Steam 游戏。setAlwaysOnTop + 持续抢焦点 才能上浮。
     mainWindow.setAlwaysOnTop(true);
     mainWindow.moveTop();
     mainWindow.focus();
-    // 1 秒后取消 always-on-top,避免挡其它窗口
-    setTimeout(() => mainWindow.setAlwaysOnTop(false), 1000);
 
     // 调试:窗口创建后给用户视觉反馈(2 秒后消失)
     // Steam Deck 掌机模式下窗口可能被 Gamescope 隐藏,这个 overlay 是显眼的"窗口可见"指示
@@ -268,6 +267,21 @@ function createMainWindow() {
         })();
       `).catch(() => {});
     }
+
+    // 持续抢焦点 — 每 5 秒 focus() + moveTop() 一次
+    // Steam Big Picture 在 z-order 上顽固,只能循环推
+    const focusInterval = setInterval(() => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        clearInterval(focusInterval);
+        return;
+      }
+      if (process.env.ENDFIELD_NO_FOCUS_STEAL === '1') {
+        clearInterval(focusInterval);
+        return;
+      }
+      mainWindow.moveTop();
+      mainWindow.focus();
+    }, 5000);
   });
 
   // 持久化窗口大小
