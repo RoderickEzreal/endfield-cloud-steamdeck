@@ -51,10 +51,20 @@ app.commandLine.appendSwitch(
   ].join(',')
 );
 
-// Wayland / X11 自动选择(Steam Deck Gamescope 优先 Wayland)
-// 注:'auto' 在 SteamOS 上会落到 XWayland + MIT-MAGIC-COOKIE-1 auth,导致无桌面 session 时启动失败。
-//    强制 'wayland' 是 Steam Deck / SteamOS 3.x 的安全默认;非 Wayland 环境仍能通过 CLI --ozone-platform=x11 覆盖。
-app.commandLine.appendSwitch('ozone-platform-hint', 'wayland');
+// Ozone 平台选择
+//
+// 关键认知(2026-10-16 实测,基于 Cider issue #1447 同款问题):
+//   Gamescope 自称 Wayland 合成器,但**实际只能显示 X11/XWayland 应用**。
+//   Electron/Chromium 的 Ozone/Wayland 后端在 Gamescope 下创建的 surface,
+//   Gamescope 渲染不出来 → "进程跑着、窗口不可见、Steam Big Picture 还在前面"。
+//   修复:Chromium 在 Gamescope 下应走 XWayland,不要 Wayland。
+//
+//   桌面模式 KWin:Chromium 走 Wayland(hint=auto 会优先 Wayland)
+//   掌机模式 Gamescope:Chromium 必须走 X11(hint=auto 会落到 XWayland)
+//
+// 用 'auto' 让 Chromium 自己判断,两种 mode 都 OK。
+// CLI 覆盖:--ozone-platform=wayland 或 --ozone-platform=x11
+app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
 
 // GPU 栅格化 + 零拷贝
 app.commandLine.appendSwitch('enable-gpu-rasterization');
@@ -217,8 +227,7 @@ function createMainWindow() {
     resizable: true,
     minWidth: 640,
     minHeight: 480,
-    // Steam Deck Gamescope 下无边框窗口更稳(避免 steam Big Picture overlay 遮盖)
-    frame: false,
+    frame: process.platform !== 'linux', // Linux 默认无边框(KWin/Gamescope 都接受);其他平台有标题栏
     // Steam 识别窗口类名 — 让 Steam Input / 覆盖层能找到
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -247,14 +256,10 @@ function createMainWindow() {
       mainWindow.setFullScreen(true);
     }
     mainWindow.show();
-    // Steam Deck 掌机模式根因:Steam Big Picture 在 Gamescope 里
-    // 持续作为激活窗口覆盖所有非 Steam 游戏。setAlwaysOnTop + 持续抢焦点 才能上浮。
-    mainWindow.setAlwaysOnTop(true);
-    mainWindow.moveTop();
     mainWindow.focus();
 
-    // 调试:窗口创建后给用户视觉反馈(2 秒后消失)
-    // Steam Deck 掌机模式下窗口可能被 Gamescope 隐藏,这个 overlay 是显眼的"窗口可见"指示
+    // 调试 overlay(ENDFIELD_DEBUG_OVERLAY=1):窗口创建 2 秒后消失的视觉指示
+    // 用途:如果用户看到此 overlay,说明窗口确实显示出来了;看不到则说明被某层遮盖
     if (process.env.ENDFIELD_DEBUG_OVERLAY === '1') {
       mainWindow.webContents.executeJavaScript(`
         (() => {
@@ -267,21 +272,6 @@ function createMainWindow() {
         })();
       `).catch(() => {});
     }
-
-    // 持续抢焦点 — 每 5 秒 focus() + moveTop() 一次
-    // Steam Big Picture 在 z-order 上顽固,只能循环推
-    const focusInterval = setInterval(() => {
-      if (!mainWindow || mainWindow.isDestroyed()) {
-        clearInterval(focusInterval);
-        return;
-      }
-      if (process.env.ENDFIELD_NO_FOCUS_STEAL === '1') {
-        clearInterval(focusInterval);
-        return;
-      }
-      mainWindow.moveTop();
-      mainWindow.focus();
-    }, 5000);
   });
 
   // 持久化窗口大小
