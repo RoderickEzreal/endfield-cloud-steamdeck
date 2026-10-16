@@ -46,14 +46,15 @@ app.commandLine.appendSwitch(
     'VaapiIgnoreDriverChecks',
     'WebRTCPipewireSupport',
     'GamepadExtensionsChromium',
-    'UseOzonePlatformX11',
     'UseOzonePlatformWayland',
     'WebContentsForceDark',
   ].join(',')
 );
 
 // Wayland / X11 自动选择(Steam Deck Gamescope 优先 Wayland)
-app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
+// 注:'auto' 在 SteamOS 上会落到 XWayland + MIT-MAGIC-COOKIE-1 auth,导致无桌面 session 时启动失败。
+//    强制 'wayland' 是 Steam Deck / SteamOS 3.x 的安全默认;非 Wayland 环境仍能通过 CLI --ozone-platform=x11 覆盖。
+app.commandLine.appendSwitch('ozone-platform-hint', 'wayland');
 
 // GPU 栅格化 + 零拷贝
 app.commandLine.appendSwitch('enable-gpu-rasterization');
@@ -74,6 +75,14 @@ app.commandLine.appendSwitch('disable-sync');
 app.commandLine.appendSwitch('disable-translate');
 app.commandLine.appendSwitch('no-pings');
 app.commandLine.appendSwitch('no-first-run');
+
+// 强制不走任何代理。
+// 原因:SteamOS / KDE Plasma 菜单启动器(走 foreground_booster → systemd transient service)
+//      会带入 HTTP_PROXY / HTTPS_PROXY,导致云游戏 CDN SSL 握手失败(ERR_CONNECTION_CLOSED,页面黑屏)。
+//      云游戏本身走 WebRTC(直 UDP),代理无效,反而会卡握手。
+// 覆盖方式:CLI 传 --proxy-server=... 仍可启用。
+app.commandLine.appendSwitch('no-proxy-server');
+process.env.HTTP_PROXY = process.env.HTTPS_PROXY = process.env.http_proxy = process.env.https_proxy = '';
 
 // ============================================================
 // CLI 参数解析
