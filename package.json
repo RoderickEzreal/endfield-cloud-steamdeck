@@ -54,10 +54,7 @@
       "synopsis": "Endfield cloud game wrapper for Steam Deck",
       "description": "Lightweight Chromium-based shell that loads the official Endfield cloud game webpage. Designed for Steam Deck (Arch Linux). Native Web Gamepad API pass-through, persistent cookie session, GPU/Vulkan acceleration.",
       "executableName": "endfield-cloud-client",
-      "icon": [
-        "resources/icons/256x256.png",
-        "resources/icons/512x512.png"
-      ],
+      "icon": "resources/icons",
       "desktop": {
         "Name": "Endfield Cloud",
         "Comment": "Endfield cloud game wrapper",
