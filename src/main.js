@@ -85,6 +85,31 @@ app.commandLine.appendSwitch('no-proxy-server');
 process.env.HTTP_PROXY = process.env.HTTPS_PROXY = process.env.http_proxy = process.env.https_proxy = '';
 
 // ============================================================
+// Wayland socket 自适应(掌机模式 Gamescope 用 gamescope-0,
+// 桌面模式 KWin 用 wayland-0)。Chromium ozone 直读 $WAYLAND_DISPLAY,
+// 没设的话启动失败。这里在 app 启动前兜底探测。
+// ============================================================
+if (!process.env.WAYLAND_DISPLAY) {
+  const fs = require('fs');
+  const path = require('path');
+  const xrd = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid?.() || 0}`;
+  const candidates = [];
+  try {
+    for (const name of fs.readdirSync(xrd)) {
+      if (/^(wayland|gamescope)-\d+$/.test(name)) {
+        candidates.push(name);
+      }
+    }
+  } catch (_) { /* 目录不可读就跳 */ }
+  // 优先 gamescope(掌机模式)
+  candidates.sort((a, b) => (a.startsWith('gamescope') ? -1 : 1) - (b.startsWith('gamescope') ? -1 : 1));
+  if (candidates.length > 0) {
+    process.env.WAYLAND_DISPLAY = candidates[0];
+    console.log(`[wayland] auto-detected: ${candidates[0]} (XDG_RUNTIME_DIR=${xrd})`);
+  }
+}
+
+// ============================================================
 // CLI 参数解析
 // ============================================================
 function parseCliArgs(argv) {
