@@ -1,6 +1,6 @@
 {
   "name": "endfield-cloud-client",
-  "version": "1.0.1",
+  "version": "1.0.10",
   "description": "Lightweight Chromium wrapper for the Endfield cloud game, optimized for Steam Deck (Arch Linux)",
   "main": "src/main.js",
   "author": "roderickezreal",
@@ -11,7 +11,6 @@
     "start": "electron .",
     "start:debug": "electron . --enable-logging=stderr --v=1",
     "start:no-gpu": "electron . --disable-gpu",
-    "start:wayland": "electron . --enable-features=UseOzonePlatform --ozone-platform=wayland",
     "build:linux": "electron-builder --linux AppImage --x64",
     "build:linux-debug": "electron-builder --linux --dir --x64"
   },
