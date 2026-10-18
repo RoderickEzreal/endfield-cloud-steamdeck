@@ -1,13 +1,13 @@
 # Endfield Cloud Client
 
-> 专为 **Steam Deck** 设计的轻量级 Chromium 封装壳,用来游玩鹰角网络的《云·明日方舟:终末地》网页云游戏。
+> 专为 **Steam Deck** 设计的轻量级 Chromium 封装壳,用来游玩鹰角《云·明日方舟:终末地》网页云游戏。
 
 [![Latest Release](https://img.shields.io/github/v/release/RoderickEzreal/endfield-cloud-steamdeck?style=flat-square&color=blue)](https://github.com/RoderickEzreal/endfield-cloud-steamdeck/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Platform: Arch Linux](https://img.shields.io/badge/Platform-Arch%20Linux-1793d1.svg)](https://wiki.archlinux.org/)
+[![Platform: Linux](https://img.shields.io/badge/Platform-Linux-1793d1.svg)](https://wiki.archlinux.org/)
 [![Steam Deck Ready](https://img.shields.io/badge/Steam_Deck-ready-success.svg)](https://www.steamdeck.com/)
 [![Engine: Electron](https://img.shields.io/badge/Engine-Electron-47848F.svg)](https://www.electronjs.org/)
-[![Wayland Only](https://img.shields.io/badge/Wayland-only-blueviolet.svg)](https://wayland.freedesktop.org/)
+[![Wayland First](https://img.shields.io/badge/Wayland-first-blueviolet.svg)](https://wayland.freedesktop.org/)
 
 [English](#english) · [中文](#中文)
 
@@ -27,10 +27,6 @@
 - ❌ 不外挂、不加速、不修改云游戏串流协议
 
 它只是壳。Chromium 内核 + 系统原生手柄 + 持久化 Cookie。**所有游戏数据、所有登录校验、所有协议交互均经官方云游戏网页处理**。
-
-### 截图
-
-> 截图待补。你装上后可以截一张贴 PR / issue。
 
 ### 核心特性
 
@@ -68,8 +64,8 @@ cp dist/endfield-cloud-client-*.AppImage ~/apps/endfield-cloud-client.AppImage
 chmod +x ~/apps/endfield-cloud-client.AppImage
 
 # 5. 用 wrapper 启动(自动适配桌面/掌机模式)
-./scripts/launch-steamdeck.sh /home/deck/apps/endfield-cloud-client.AppImage
-# 或拷到 ~/bin 后:
+./scripts/launch-steamdeck.sh ~/apps/endfield-cloud-client.AppImage
+# 或拷到 ~/bin 后(默认读 $HOME/apps/...):
 cp scripts/launch-steamdeck.sh ~/bin/endfield-cloud
 chmod +x ~/bin/endfield-cloud
 ~/bin/endfield-cloud
@@ -116,10 +112,12 @@ endfield-cloud-client --window-mode=fullscreen     # auto / fullscreen / windowe
 让游戏模式(Gamescope)能像原生游戏一样启动:
 
 1. Steam → 游戏 → 在库中添加非 Steam 的游戏
-2. 浏览 → `/home/deck/apps/endfield-cloud-client.AppImage`
+2. 浏览 → `~/apps/endfield-cloud-client.AppImage`
 3. 添加
 
 详细 Steam Input 手柄布局配置见 [docs/steam-input-config.md](docs/steam-input-config.md)。
+
+> 💡 wrapper 里的 `--no-sandbox` 来自 Chromium SUID helper 与 AppImage FUSE namespace 在 SteamOS 内核下的冲突,不影响安全(见 `src/main.js` 里 `contextIsolation: true` / `nodeIntegration: false`)。
 
 ### 文档
 
@@ -135,9 +133,10 @@ endfield-cloud-client --window-mode=fullscreen     # auto / fullscreen / windowe
 | 平台 | 状态 |
 |---|---|
 | SteamOS 3.5+ (Steam Deck 原生) | ✅ 验证通过 |
-| Arch Linux 2024+ | ✅ 验证通过 |
-| Manjaro | ✅ 应该可用(未实测) |
-| 其它 Linux | ⚠️ Wayland-only;X11 桌面需手动 `--ozone-platform=x11` |
+| Arch Linux 2024+ (Wayland) | ✅ 验证通过 |
+| Manjaro (Wayland) | ✅ 应该可用(未实测) |
+| 其它 Linux (X11 桌面) | ⚠️ 需手动加 `--ozone-platform=x11` |
+| macOS / Windows | ❌ 不在支持范围(Steam Deck + Linux 项目) |
 
 x86_64 only。
 
@@ -232,10 +231,65 @@ cd endfield-cloud-steamdeck
 mkdir -p ~/apps
 cp dist/endfield-cloud-client-*.AppImage ~/apps/endfield-cloud-client.AppImage
 chmod +x ~/apps/endfield-cloud-client.AppImage
-~/apps/endfield-cloud-client.AppImage --ozone-platform=wayland
+
+# Launch via wrapper (auto-adapts to desktop / gaming mode):
+./scripts/launch-steamdeck.sh ~/apps/endfield-cloud-client.AppImage
 ```
 
-Or download a pre-built AppImage from the [latest release](https://github.com/RoderickEzreal/endfield-cloud-steamdeck/releases/latest).
+Or download a pre-built AppImage from the [latest release](https://github.com/RoderickEzreal/endfield-cloud-steamdeck/releases/latest) and run it directly.
+
+### Shortcuts
+
+| Key | Action |
+|---|---|
+| `F11` | Toggle borderless fullscreen |
+| `ESC` | Exit fullscreen |
+| `F5` | Reload page (ignore cache) |
+| `F12` | Toggle gamepad input |
+| `Ctrl+Q` / `Cmd+Q` | Quit |
+| `Alt+F4` | Quit |
+
+### CLI Options
+
+```bash
+endfield-cloud-client --url=https://endfield.hypergryph.com/cloud
+endfield-cloud-client --window-size=1920x1080
+endfield-cloud-client --fullscreen
+endfield-cloud-client --windowed                   # force windowed (overrides memory)
+endfield-cloud-client --window-mode=fullscreen     # auto / fullscreen / windowed
+```
+
+### Compatibility
+
+| Platform | Status |
+|---|---|
+| SteamOS 3.5+ (Steam Deck) | ✅ Verified |
+| Arch Linux 2024+ (Wayland) | ✅ Verified |
+| Manjaro (Wayland) | ✅ Should work (untested) |
+| Other Linux (X11 desktop) | ⚠️ Add `--ozone-platform=x11` manually |
+| macOS / Windows | ❌ Out of scope (Steam Deck + Linux project) |
+
+x86_64 only.
+
+### Development
+
+```bash
+git clone https://github.com/RoderickEzreal/endfield-cloud-steamdeck.git
+cd endfield-cloud-steamdeck
+npm install
+npm start              # run from source, no packaging
+npm run start:debug    # with verbose logging
+npm run build:linux    # produce AppImage in dist/
+```
+
+### Documentation
+
+| Document | Content |
+|---|---|
+| [docs/steam-deck-setup.md](docs/steam-deck-setup.md) | Full Steam Deck install walkthrough |
+| [docs/steam-library-add.md](docs/steam-library-add.md) | Adding to Steam library (multiple methods) |
+| [docs/steam-input-config.md](docs/steam-input-config.md) | Steam Input gamepad layout config |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | Troubleshooting (gamepad / GPU / webpage) |
 
 ### License
 
