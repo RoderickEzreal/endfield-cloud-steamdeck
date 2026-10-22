@@ -37,6 +37,7 @@ const USER_ACTIVATION_DELAY_MS = 800;
 const WINDOW_STATE_SAVE_DEBOUNCE_MS = 500;
 const CONFIG_DIR = app.getPath('userData');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'window-state.json');
+const SHIM_PATH = path.join(__dirname, 'shim.js');
 
 // ============================================================
 // Chromium 命令行开关 — 针对 Steam Deck (AMD Van Gogh APU) 优化
@@ -51,25 +52,46 @@ app.commandLine.appendSwitch(
     'VaapiIgnoreDriverChecks',
     'WebRTCPipewireSupport',
     'GamepadExtensionsChromium',
-    'UseOzonePlatformWayland',
     'WebContentsForceDark',
   ].join(',')
 );
+// 注:原先这里有 'UseOzonePlatformWayland' —— 那是很早就被 Chromium 移除的 legacy
+// feature 名,现在完全不起作用,留着只会误导人。删掉。
 
-// Ozone 平台选择
+// ============================================================
+// Ozone 平台选择 —— 强制 X11 / XWayland
+// ============================================================
 //
-// 关键认知(2026-10-16 实测,基于 Cider issue #1447 同款问题):
-//   Gamescope 自称 Wayland 合成器,但**实际只能显示 X11/XWayland 应用**。
-//   Electron/Chromium 的 Ozone/Wayland 后端在 Gamescope 下创建的 surface,
-//   Gamescope 渲染不出来 → "进程跑着、窗口不可见、Steam Big Picture 还在前面"。
-//   修复:Chromium 在 Gamescope 下应走 XWayland,不要 Wayland。
+// 为什么必须钉死 x11(而不是 auto):
 //
-//   桌面模式 KWin:Chromium 走 Wayland(hint=auto 会优先 Wayland)
-//   掌机模式 Gamescope:Chromium 必须走 X11(hint=auto 会落到 XWayland)
+// 1) 掌机模式(Gamescope)
+//    Gamescope 自称 Wayland 合成器,但**实际只能显示 X11/XWayland 应用**。
+//    Chromium 的 Ozone/Wayland 后端在 Gamescope 下创建的 surface,Gamescope
+//    渲染不出来 → "进程跑着、窗口不可见、Steam Big Picture 还在前面"。
+//    (v1.0.7 的关键修复,参考 Cider issue #1447)
 //
-// 用 'auto' 让 Chromium 自己判断,两种 mode 都 OK。
-// CLI 覆盖:--ozone-platform=wayland 或 --ozone-platform=x11
-app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
+// 2) 桌面模式(KWin)—— 这一条更隐蔽,直接关系到"3D 鼠标"能不能用:
+//    Chromium 的**原生 Wayland 指针锁定**实现在
+//    chrome/browser/ui/views/frame/browser_desktop_window_tree_host_linux.cc,
+//    那是 **Chrome 专用**类。Electron 走的是 views 层的
+//    DesktopWindowTreeHostLinux,继承基类
+//    `WindowTreeHost::SupportsMouseLock() { return false; }`。
+//    → Electron 直到 v40.5.0(2026-02-19,electron/electron#49283)才有原生
+//      Wayland pointer lock。在此之前,Chromium 会退回**软件锁**:
+//      光标被隐藏,但只在靠近边缘 15% 时才回中,光标照样能跑出窗口 ——
+//      正是"移动视角时鼠标会离开窗口"这个症状。
+//    (electron/electron#49754 有视频复现,原文:"On wayland when the pointer
+//     is locked the mouse only becomes hidden until it moves outside of the
+//     window's bounds")
+//    而 X11/XWayland 路径走的是 `cursor_client->LockCursor()` → 真正的
+//    XGrabPointer 硬约束,光标**完全锁在窗口内**,mouse-look 才正常。
+//
+// 结论:本项目统一走 XWayland,两种模式行为一致,且指针锁定是硬约束。
+//       将来若升级到 Electron ≥ 40.5.0 并且桌面端想用原生 Wayland,
+//       再按模式分别放开(掌机模式仍必须 x11)。
+//
+// CLI 覆盖:--ozone-platform=wayland 可强行走原生 Wayland(仅供调试)。
+app.commandLine.appendSwitch('ozone-platform-hint', 'x11');
 
 // GPU 栅格化 + 零拷贝
 app.commandLine.appendSwitch('enable-gpu-rasterization');
@@ -154,6 +176,8 @@ function parseCliArgs(argv) {
       out.fullscreen = true;
     } else if (arg === '--windowed') {
       out.windowMode = 'windowed';
+      // 显式覆盖 --fullscreen(wrapper 会同时传两个,后出现的 --windowed 优先)
+      out.fullscreen = false;
     } else if (arg === '--window-mode=fullscreen') {
       out.windowMode = 'fullscreen';
     } else if (arg.startsWith('--window-mode=')) {
@@ -200,7 +224,89 @@ function saveWindowState(win) {
 // ============================================================
 let mainWindow = null;
 let gamepadMuted = false;
+let pointerLocked = false;   // 渲染进程告知:当前是否处于指针锁定(3D 鼠标)状态
 const cliOpts = parseCliArgs(process.argv.slice(1));
+
+// ============================================================
+// main world 兼容垫片注入
+// ============================================================
+//
+// 必须在 main world 注入(contextIsolation=true 时 preload 是 isolated world,
+// 改 Element.prototype / navigator 对页面不生效)。
+// webContents.executeJavaScript 走的就是页面 main world。
+//
+// 垫片内容见 src/shim.js:
+//   1) requestPointerLock 去掉 Linux 不支持的 unadjustedMovement(3D 鼠标修好的关键)
+//   2) 派发 ef-pointerlock 事件上报锁定状态
+//   3) navigator.getGamepads 覆写(F12 手柄静音)
+let shimSource = null;
+
+function getShimSource() {
+  if (shimSource === null) {
+    try {
+      shimSource = fs.readFileSync(SHIM_PATH, 'utf8');
+    } catch (e) {
+      console.error('[shim] read failed:', e.message);
+      shimSource = '';
+    }
+  }
+  return shimSource;
+}
+
+function injectShim(win) {
+  if (!win || win.isDestroyed()) return;
+  const src = getShimSource();
+  if (!src) return;
+  win.webContents.executeJavaScript(src).then(
+    (r) => console.log('[shim] injected ->', r),
+    (e) => console.error('[shim] inject failed:', e.message)
+  );
+}
+
+// ============================================================
+// 诊断 IPC — 渲染进程(preload)把 pointer lock 现场日志送回主进程打印
+// ============================================================
+
+// preload(sandbox)读不到本地文件,用同步 IPC 取垫片源码
+ipcMain.on('get-shim-source', (event) => {
+  event.returnValue = getShimSource();
+});
+
+ipcMain.on('pointer-lock-state', (_event, locked, element) => {
+  const next = locked === true;
+  if (next !== pointerLocked) {
+    console.log(`[pointer-lock] ${next ? 'LOCKED' : 'UNLOCKED'}${element ? ' on ' + element : ''}`);
+  }
+  pointerLocked = next;
+});
+
+ipcMain.on('pointer-lock-error', (_event, name, message) => {
+  console.log(`[pointer-lock] ERROR: ${name || ''} ${message || ''}`.trim());
+});
+
+let lastFocusState = '';
+ipcMain.on('renderer-focus-state', (_event, state) => {
+  const key = `${state && state.hasFocus}|${state && state.visibility}`;
+  if (key === lastFocusState) return;
+  lastFocusState = key;
+  console.log(`[renderer] hasFocus=${state && state.hasFocus} visibility=${state && state.visibility}`);
+});
+
+// 指针锁定请求被拒 → 把窗口焦点要回来(一次性,不循环抢)
+//
+// 为什么:Chromium 要求 requestPointerLock() 时窗口持有 OS 焦点。
+// 掌机模式(Gamescope)/Steam 覆盖层都可能让窗口短暂失焦,
+// 一旦失焦,锁定请求必然失败 → 视角模式进不去,光标还会跑出窗口。
+// 这里只在"锁定请求失败"这个具体时刻补一次焦点,不做周期性抢焦点。
+ipcMain.on('pointer-lock-failed', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isFocused()) {
+    console.log('[pointer-lock] request failed but window already focused');
+    return;
+  }
+  console.log('[pointer-lock] request failed -> restoring window focus, will retry');
+  mainWindow.focus();
+});
 
 // ============================================================
 // 主窗口创建
@@ -254,6 +360,28 @@ function createMainWindow() {
   // 加载云游戏页面
   mainWindow.loadURL(cliOpts.url);
 
+  // 注入 main world 垫片(每次导航都重来一次,垫片是 per-document 的)
+  mainWindow.webContents.on('dom-ready', () => injectShim(mainWindow));
+
+  // 页面 console 转发到终端 —— 定位问题时能直接看到页面自己的报错
+  // (比如页面 catch 住的 requestPointerLock NotSupportedError)
+  mainWindow.webContents.on('console-message', (...args) => {
+    // Electron 33: (event, {level, message, lineNumber, sourceId})
+    // 老签名:   (event, level, message, line, sourceId)
+    let message = '';
+    let sourceId = '';
+    if (args[1] && typeof args[1] === 'object') {
+      message = args[1].message || '';
+      sourceId = args[1].sourceId || '';
+    } else {
+      message = String(args[2] ?? '');
+      sourceId = String(args[4] ?? '');
+    }
+    // 只转发页面自己的日志,浏览器内部噪音过滤掉
+    if (!/[ef-shim]/.test(message) && !/pointerlock|pointer lock/i.test(message)) return;
+    console.log(`[page] ${message}${sourceId ? '  (' + String(sourceId).split('/').pop() + ')' : ''}`);
+  });
+
   // 准备就绪后显示
   mainWindow.once('ready-to-show', () => {
     const wantFullscreen =
@@ -265,6 +393,18 @@ function createMainWindow() {
     }
     mainWindow.show();
     mainWindow.focus();
+    // 关键:Chromium 判定"能不能锁指针"看的是**渲染进程**的焦点
+    // (RenderWidgetHostView::HasFocus),不是窗口的 toplevel 焦点。
+    // BrowserWindow.focus() 只管后者,必须再补一发 webContents.focus()。
+    mainWindow.webContents.focus();
+  });
+
+  // 窗口拿到焦点时,同步把焦点给渲染进程。
+  // 掌机模式(Gamescope)/Steam 覆盖层都可能让渲染进程掉焦点,
+  // 而掉焦点状态下 requestPointerLock() 必被拒 —— 视角模式就进不去。
+  // 这是"跟随式"补焦点,不是周期性抢焦点。
+  mainWindow.on('focus', () => {
+    if (!mainWindow.isDestroyed()) mainWindow.webContents.focus();
   });
 
   // 持久化窗口大小 — resize/move 触发频繁,debounce 避免每帧写盘
@@ -284,23 +424,28 @@ function createMainWindow() {
   });
 
   // 注入合成 user activation,让 Chromium 立刻激活 Web Gamepad / Web Audio
-  // 根因:Chromium 默认要求用户先有点击/键盘才轮询 getGamepads,云游戏页面没激活就不轮询
+  //
+  // 关键修正(2026-10-21):之前这里 dispatch 了一个**不可信**的 MouseEvent + KeyboardEvent,
+  //   · 不可信事件永远拿不到 transient activation —— 激活其实一直没生效
+  //   · 但它**会真的冒到页面的 document 级监听器**。云终末地的 keydown 处理器
+  //     收到这个假 Tab 就会去申请指针锁定,拿不到激活 → SecurityError,
+  //     还会顺带触发游戏内的按键动作。
+  // 现在改成 executeJavaScript(code, userGesture=true):
+  //   第二个参数让这次执行**带用户手势**,Blink 会给 frame 记一次 transient activation,
+  //   而且不再往页面里塞任何伪造的 DOM 事件。
   mainWindow.webContents.once('did-finish-load', () => {
     setTimeout(() => {
-      mainWindow.webContents.executeJavaScript(`
-        (() => {
-          // 模拟一次用户激活(不冒泡到 UI,只触发内部激活状态)
-          const ev = new MouseEvent('click', {
-            bubbles: false, cancelable: true, view: window,
-            button: 0, buttons: 0, clientX: 0, clientY: 0
-          });
-          document.dispatchEvent(ev);
-          // 顺手给个键盘激活(WebRTC / Web Audio 也要)
-          const kev = new KeyboardEvent('keydown', { bubbles: false, key: 'Tab' });
-          document.dispatchEvent(kev);
-        })();
-      `).catch((err) => console.error('[user-activation] failed:', err.message));
+      mainWindow.webContents.executeJavaScript('void 0', true).then(
+        () => console.log('[user-activation] granted (userGesture=true)'),
+        (err) => console.error('[user-activation] failed:', err.message)
+      );
     }, USER_ACTIVATION_DELAY_MS);
+  });
+
+  // 诊断:记录每个 frame 的导航(主 frame / 子 frame = iframe)
+  // 云游戏页面若把本体放在 iframe 里,指针锁定受 iframe 的 allow/sandbox 约束
+  mainWindow.webContents.on('did-frame-navigate', (_e, url, isMainFrame) => {
+    console.log(`[frame] ${isMainFrame ? 'main' : 'sub '} ${String(url).slice(0, 180)}`);
   });
 
   // 外部链接默认浏览器打开(避免在游戏窗口里跳走)
@@ -358,10 +503,30 @@ function registerShortcuts(win) {
         event.preventDefault();
         break;
       case 'Escape':
-        // 退出全屏
+        // ESC:退出全屏 / 退出指针锁定
+        //
+        // 指针锁定(3D 鼠标)状态下,ESC 是 Chromium 与游戏"退出视角锁定"的标准按键。
+        // 如果这里 preventDefault 吃掉,渲染进程收不到 ESC,Chromium 的强制解锁也不触发
+        // → 光标被永久困在画面里,只能杀进程。
+        //
+        // 锁定状态的权威来源是 main world 的 document.pointerLockElement
+        // (isolated world 读到的可能不同步),所以这里直接问页面。
+        if (pointerLocked) {
+          // 快速路径:IPC 已知锁定 → 直接放行
+          console.log('[shortcut] ESC passed through (pointer locked)');
+          break;
+        }
         if (win.isFullScreen()) {
-          win.setFullScreen(false);
-          event.preventDefault();
+          win.webContents.executeJavaScript('!!document.pointerLockElement').then(
+            (locked) => {
+              if (locked) {
+                console.log('[shortcut] ESC passed through (pointer locked, queried)');
+                return;
+              }
+              win.setFullScreen(false);
+            },
+            () => win.setFullScreen(false)
+          );
         }
         break;
       case 'F5':
@@ -371,8 +536,15 @@ function registerShortcuts(win) {
         break;
       case 'F12':
         // 开关手柄输入(滑块验证时关闭手柄,用触控板/鼠标)
+        //
+        // 静音标志必须写在 main world:contextIsolation=true 时 preload 在 isolated world,
+        // 在那边覆写 navigator.getGamepads 对页面完全无效(F12 以前就是因此不生效)。
+        // 覆写本体在 src/shim.js 里。
         gamepadMuted = !gamepadMuted;
-        win.webContents.send('toggle-gamepad', gamepadMuted);
+        win.webContents.executeJavaScript(
+          `window.__efGamepadMuted = ${gamepadMuted ? 'true' : 'false'};` +
+          `console.log('[ef-shim] gamepad ${gamepadMuted ? 'MUTED' : 'ENABLED'}');`
+        ).catch(() => { /* 页面还没加载完就忽略 */ });
         console.log(`[gamepad] ${gamepadMuted ? 'MUTED' : 'ENABLED'}`);
         event.preventDefault();
         break;
@@ -418,6 +590,22 @@ app.whenReady().then(() => {
     '(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 ' +
     `EndfieldCloudClient/${app.getVersion()}`
   );
+
+  // 诊断:响应头里如果有 Permissions-Policy / Feature-Policy 限制 pointer-lock,
+  // 页面调 requestPointerLock() 会直接被浏览器拒掉(报 SecurityError)。
+  // 这里只打印,不修改。
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    try {
+      const headers = details.responseHeaders || {};
+      for (const key of Object.keys(headers)) {
+        const lower = key.toLowerCase();
+        if (lower.includes('permissions-policy') || lower.includes('feature-policy')) {
+          console.log(`[headers] ${lower}: ${headers[key]}`);
+        }
+      }
+    } catch (_) { /* ignore */ }
+    callback({ responseHeaders: details.responseHeaders });
+  });
 
   const win = createMainWindow();
   registerShortcuts(win);

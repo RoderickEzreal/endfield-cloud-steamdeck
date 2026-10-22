@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Pointer Lock Probe</title>
+<style>
+  body { margin: 0; background: #111; color: #ddd; font: 13px/1.55 monospace; }
+  #log { padding: 10px; white-space: pre-wrap; }
+  #target { height: 160px; background: #234; margin: 8px 10px; padding: 8px; }
+  #target video { width: 100%; height: 100%; background: #456; }
+  button { font: inherit; padding: 6px 14px; margin: 4px; }
+</style>
+</head>
+<body>
+<div id="log">booting…</div>
+
+<div id="target">
+  <video id="WelinkGameVideo" muted playsinline></video>
+</div>
+
+<button id="btnUnadjusted">TEST A: requestPointerLock({unadjustedMovement:true})</button>
+<button id="btnPlain">TEST B: requestPointerLock()</button>
+<button id="btnProbe">TEST C: report state</button>
+<button id="btnShim">TEST D: is shim in main world?</button>
+
+<script>
+const logEl = document.getElementById('log');
+const lines = [];
+function log(...a) {
+  const s = a.map(x => (typeof x === 'string' ? x : (() => { try { return JSON.stringify(x); } catch (_) { return String(x); } })())).join(' ');
+  lines.push(s);
+  if (lines.length > 200) lines.shift();
+  logEl.textContent = lines.join('\n');
+  console.log('[PL]', s);
+}
+
+function state() {
+  let el = null;
+  try { el = document.pointerLockElement; } catch (_) {}
+  let ua = null;
+  try { ua = navigator.userActivation ? { active: navigator.userActivation.isActive, had: navigator.userActivation.hasBeenActive } : null; } catch (_) {}
+  return {
+    hasFocus: document.hasFocus(),
+    visibility: document.visibilityState,
+    locked: !!el,
+    lockElement: el ? (el.tagName + (el.id ? '#' + el.id : '')) : null,
+    activation: ua,
+  };
+}
+
+log('=== Pointer Lock Probe ===');
+log('init ' + JSON.stringify(state()));
+log('shim present in MAIN world: ' + (typeof window.__efShim !== 'undefined'));
+if (window.__efShim) log('shim info: ' + JSON.stringify({
+  version: window.__efShim.version,
+  pointerLockPatched: window.__efShim.pointerLockPatched,
+}));
+
+document.addEventListener('pointerlockchange', () => log('pointerlockchange ' + JSON.stringify(state())));
+document.addEventListener('pointerlockerror', (e) => log('pointerlockerror msg=' + (e && e.message) + ' ' + JSON.stringify(state())));
+document.addEventListener('ef-pointerlock', (e) => log('ef-pointerlock event ' + JSON.stringify(e.detail)));
+
+const target = document.getElementById('WelinkGameVideo');
+
+document.getElementById('btnUnadjusted').addEventListener('click', (e) => {
+  log('--- TEST A: requestPointerLock({unadjustedMovement:true}) trusted=' + e.isTrusted);
+  try {
+    const p = target.requestPointerLock({ unadjustedMovement: true });
+    if (p && p.catch) {
+      p.then(() => log('TEST A resolved (LOCKED) ' + JSON.stringify(state())),
+             (err) => log('TEST A REJECTED name=' + err.name + ' msg=' + err.message));
+    } else {
+      log('TEST A returned non-promise ' + String(p));
+    }
+  } catch (err) {
+    log('TEST A THREW name=' + err.name + ' msg=' + err.message);
+  }
+});
+
+document.getElementById('btnPlain').addEventListener('click', (e) => {
+  log('--- TEST B: requestPointerLock() plain trusted=' + e.isTrusted);
+  try {
+    const p = target.requestPointerLock();
+    if (p && p.catch) {
+      p.then(() => log('TEST B resolved (LOCKED) ' + JSON.stringify(state())),
+             (err) => log('TEST B REJECTED name=' + err.name + ' msg=' + err.message));
+    } else {
+      log('TEST B returned non-promise ' + String(p));
+    }
+  } catch (err) {
+    log('TEST B THREW name=' + err.name + ' msg=' + err.message);
+  }
+});
+
+document.getElementById('btnProbe').addEventListener('click', () => log('--- TEST C: ' + JSON.stringify(state())));
+document.getElementById('btnShim').addEventListener('click', () => {
+  log('--- TEST D: shim in main world = ' + (typeof window.__efShim !== 'undefined'));
+  if (window.__efShim) log('    lockState() = ' + JSON.stringify(window.__efShim.lockState()));
+});
+
+let n = 0;
+document.addEventListener('mousemove', (e) => {
+  n++;
+  if (n % 25 === 0) log('mousemove #' + n + ' mx=' + e.movementX + ' my=' + e.movementY + ' ' + JSON.stringify(state()));
+});
+
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') log('ESC seen by page, ' + JSON.stringify(state())); });
+
+log('probe ready');
+
+// ============================================================
+// 自动自测模式:?selftest=1
+// ============================================================
+// 等页面拿到 transient activation(主进程用 executeJavaScript(code, true) 授的),
+// 然后:
+//   TEST 1  用**原生未打补丁**的 requestPointerLock 传 {unadjustedMovement:true}
+//           → 预期 NotSupportedError(这就是用户遇到的 bug)
+//   TEST 2  用**打过补丁**的 requestPointerLock 传 {unadjustedMovement:true}
+//           → 预期成功锁定(这就是修复效果)
+const SELFTEST = new URLSearchParams(location.search).get('selftest') === '1';
+
+if (SELFTEST) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  function activationActive() {
+    try { return navigator.userActivation ? navigator.userActivation.isActive : false; }
+    catch (_) { return false; }
+  }
+
+  async function attempt(label, fn) {
+    log('--- ' + label);
+    try {
+      const p = fn();
+      if (p && typeof p.then === 'function') {
+        await p;
+        log(label + ' -> RESOLVED ' + JSON.stringify(state()));
+        return 'resolved';
+      }
+      await sleep(200);
+      log(label + ' -> RETURNED(' + String(p) + ') ' + JSON.stringify(state()));
+      return 'returned';
+    } catch (err) {
+      log(label + ' -> FAILED name=' + err.name + ' msg=' + err.message);
+      return 'failed';
+    }
+  }
+
+  (async () => {
+    // 等 activation
+    for (let i = 0; i < 60; i++) {
+      if (activationActive()) { log('activation acquired after ' + (i * 200) + 'ms'); break; }
+      await sleep(200);
+    }
+    if (!activationActive()) {
+      log('!! never got transient activation — aborting selftest');
+      return;
+    }
+
+    const orig = (window.__efShim && window.__efShim.origRequestPointerLock) || Element.prototype.requestPointerLock;
+
+    // TEST 1:原生实现 + unadjustedMovement → 预期 NotSupportedError
+    await attempt('TEST1 orig requestPointerLock({unadjustedMovement:true})',
+      () => orig.call(target, { unadjustedMovement: true }));
+    await sleep(500);
+
+    // TEST 2:打过补丁的实现 + unadjustedMovement → 预期成功
+    await attempt('TEST2 patched requestPointerLock({unadjustedMovement:true})',
+      () => target.requestPointerLock({ unadjustedMovement: true }));
+    await sleep(500);
+
+    log('after TEST2: ' + JSON.stringify(state()));
+    try { document.exitPointerLock(); } catch (_) {}
+    await sleep(300);
+
+    // TEST 3:原生实现无参 → 预期成功(证明平台本身支持 pointer lock)
+    await attempt('TEST3 orig requestPointerLock() no options',
+      () => orig.call(target));
+    await sleep(500);
+
+    log('after TEST3: ' + JSON.stringify(state()));
+    log('SELFTEST DONE');
+  })();
+}
+</script>
+</body>
+</html>

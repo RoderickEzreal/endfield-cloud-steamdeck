@@ -62,6 +62,32 @@ if [[ ! -d node_modules ]]; then
 fi
 
 # ============================================================
+# electron-builder 必须用**项目本地**的那份
+# ============================================================
+#
+# 千万不要用 `npx electron-builder`。
+#   SteamOS 等机器的 ~/.npmrc 常带 `omit=dev`,`npm install` 会静默跳过
+#   devDependencies → electron / electron-builder 根本没装 →
+#   npx 就去自己的 cache 拉**最新版**(2026-10-21 实测拉到 26.15.3),
+#   而本项目的 build 配置是照 electron-builder 25.x 的 schema 写的 →
+#   启动即报:
+#     configuration.linux.desktop should be one of these: null
+#
+# 用项目本地的二进制,版本由 package.json 锁死,行为可预期。
+BUILDER_BIN="node_modules/.bin/electron-builder"
+
+if [[ ! -x "$BUILDER_BIN" ]]; then
+  error "找不到本地 electron-builder:$BUILDER_BIN
+  需要 devDependencies,装一下:
+    npm install --include=dev
+  (项目根目录已有 .npmrc 写 include=dev,正常 npm install 就够;
+   若 ~/.npmrc 里还有 omit=dev,上面的 --include=dev 会覆盖它)"
+fi
+
+BUILDER_VERSION=$(node -e "console.log(require('./node_modules/electron-builder/package.json').version)" 2>/dev/null || echo "未知")
+log "使用本地 electron-builder $BUILDER_VERSION"
+
+# ============================================================
 # 检查 / 生成图标
 # ============================================================
 ensure_icons() {
@@ -125,7 +151,7 @@ if [[ "$NO_ASAR" == true ]]; then
 fi
 
 log "开始打包..."
-npx electron-builder "${BUILDER_ARGS[@]}"
+"$BUILDER_BIN" "${BUILDER_ARGS[@]}"
 
 # ============================================================
 # 完成

@@ -1,8 +1,17 @@
 #!/bin/sh
-# Endfield Cloud Client launcher — Steam Deck / Wayland-only
-# 自适应 Wayland socket:
-#   - 桌面模式(KWin):wayland-0
-#   - 掌机模式(Gamescope):gamescope-0
+# Endfield Cloud Client launcher — Steam Deck
+#
+# 渲染后端:统一 X11 / XWayland(src/main.js 里 ozone-platform-hint=x11 钉死)
+#   - 桌面模式(KWin):XWayland :0
+#   - 掌机模式(Gamescope):Gamescope 内嵌的 XWayland
+# 原因:
+#   1) Gamescope 只合成 X11/XWayland 客户端,原生 Wayland surface 渲染不出来
+#   2) Electron < 40.5.0 没有原生 Wayland pointer lock,只有"软件锁"
+#      (光标隐藏但能跑出窗口)—— XWayland 才是真 XGrabPointer 硬约束
+#
+# WAYLAND_DISPLAY 仍会探测并导出:部分图形栈(以及 Steam Input 叠加层)会读它。
+# Chromium 本身已经强制走 x11,不再依赖这个变量。
+#
 # 解包模式(AppImage):跳过 FUSE,适合 Gamescope / 受限 cgroup
 #
 # 用法:
